@@ -1,0 +1,13 @@
+# Ignore virtual environment
+.venv/
+
+# Ignore any JSON files except repos_list.json
+*.json
+!repos_list.json
+
+# Bytecode and cache
+__pycache__/
+*.py[cod]
+
+# Miscellaneous
+.DS_Store
