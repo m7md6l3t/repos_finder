@@ -2,32 +2,13 @@ import requests
 import json
 import os
 from datetime import datetime, timezone
-
-# Configuration
-OWNED_REPOS_FILE = "repos_list.json"
-FILTERED_REPOS_FILE = "filtered_repos.json"
+from FilterRepo import Filterby_Python_percentage, Load_repos, cleaned_repos
+from config import OWNED_REPOS_FILE, FILTERED_REPOS_FILE, REJECTED_REPOS_FILE
 
 # Load the existed repos
-owned_repos = set()
-if os.path.exists(OWNED_REPOS_FILE):
-    try:
-        with open(OWNED_REPOS_FILE, "r", encoding="utf-8") as f:
-            content = f.read()
-            if content.strip():
-                loaded_data = json.loads(content)
-                if isinstance(loaded_data, list):
-                    owned_repos = set(loaded_data)
-                else:
-                    print(f"Warning: '{OWNED_REPOS_FILE}' does not contain a JSON list. Starting with an empty set.")
-            else:
-                print(f"Warning: '{OWNED_REPOS_FILE}' is empty. Starting with an empty set of owned repos.")
-    except json.JSONDecodeError:
-        print(f"Warning: Could not decode JSON from '{OWNED_REPOS_FILE}'. Starting with an empty set of owned repos.")
-    except Exception as e:
-        print(f"Error loading '{OWNED_REPOS_FILE}': {e}. Starting with an empty set of owned repos.")
-else:
-    print(f"Info: '{OWNED_REPOS_FILE}' not found. Starting with an empty set of owned repos.")
-
+owned_repos = Load_repos(OWNED_REPOS_FILE)
+rejected_repos = Load_repos(REJECTED_REPOS_FILE)
+merged_repos = owned_repos.union(rejected_repos)
 # SEARCH CRITERIA HERE
 query = 'language:Python stars:>500 pushed:>2024-11-01'
 per_page = 100 # first 100 results
@@ -52,25 +33,8 @@ try:
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     results = response.json()
-
-    cleaned_filtered_repos = []
-    for repo_data in results.get('items', []):
-        if repo_data.get('full_name') not in owned_repos:
-            cleaned_repo_info = {
-                "full_name": repo_data.get('full_name'),
-                "html_url": repo_data.get('html_url'),
-                "stars": repo_data.get('stargazers_count'),
-                "forks": repo_data.get('forks_count'),
-                "watchers": repo_data.get('watchers_count'),
-                "open_issues": repo_data.get('open_issues_count'),
-                "language": repo_data.get('language'),
-                "description": repo_data.get('description', ''),
-                "created_at": repo_data.get('created_at'),
-                "updated_at": repo_data.get('updated_at'),
-                "pushed_at": repo_data.get('pushed_at'),
-                "license": repo_data.get('license', {}).get('name') if repo_data.get('license') else None,
-            }
-            cleaned_filtered_repos.append(cleaned_repo_info)
+    cleaned_filtered_repos = cleaned_repos(merged_repos, results)
+    cleaned_filtered_repos = Filterby_Python_percentage(cleaned_filtered_repos, headers)
 
     # Sort the repositories:
     # Primary key: pushed_at (descending - more recent first)
