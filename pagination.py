@@ -1,11 +1,10 @@
 import requests
-from config import get_header
+from config import get_github_header
 
-
-per_page = 1 # first 100 results
+per_page = 20 # first 100 results
 start_page = 1
 to_page = 10
-headers = get_header()
+headers = get_github_header()
 
 def get_github_repositories(query):
     print(f"Searching GitHub with query: {query}")

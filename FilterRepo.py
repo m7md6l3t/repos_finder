@@ -1,9 +1,12 @@
 import requests
 import json
 import os
-from config import REJECTED_REPOS_FILE
+import time
+from bs4 import BeautifulSoup
+from config import (REJECTED_REPOS_FILE, SWE_BENCH_BASE_URL, SWE_BENCH_FILTER_PARAMS,
+                    SWE_BENCH_GREEN_LIST_FILE, SWE_BENCH_BLACKLIST_FILE)
 
- # Filter by Python language percentage
+# Filter by Python language percentage
 def Filterby_Python_percentage(cleaned_filtered_repos, headers):
     filtered_by_python = []
     rejected_by_python = []
@@ -87,3 +90,90 @@ def cleaned_repos(merged_repos, results):
             }
             cleaned_filtered_repos.append(cleaned_repo_info)
     return cleaned_filtered_repos
+
+def filter_by_swe_bench_batches(repos_to_check, swe_bench_auth_headers):
+    """
+    Checks repositories for batch validity.
+
+    Args:
+        repos_to_check (list): List of repository dictionaries.
+        swe_bench_auth_headers (dict): Authentication headers.
+
+    Returns:
+        list: Repositories that passed the SWE-Bench check.
+    """
+    passed_repos = []
+    failed_or_problematic_repo_urls = [] # Store URLs of empty repos
+
+    if not repos_to_check:
+        return []
+
+    print(f"\nChecking {len(repos_to_check)} repos against SWE-Bench Plus for batch validity...")
+
+    for i, repo_info in enumerate(repos_to_check):
+        full_name = repo_info.get("full_name")
+        html_url = repo_info.get("html_url")
+
+        if not full_name or not html_url:
+            print(f"  Skipping repo due to missing full_name or html_url: {repo_info}")
+            if html_url:
+                 failed_or_problematic_repo_urls.append(html_url)
+            continue
+
+        swe_bench_repo_name = full_name.replace("/", "__")
+        target_url = f"{SWE_BENCH_BASE_URL}{swe_bench_repo_name}{SWE_BENCH_FILTER_PARAMS}"
+
+        print(f"({i+1}/{len(repos_to_check)}) Checking SWE-Bench for: {full_name}")
+        print(f"  URL: {target_url}")
+
+        try:
+            response = requests.get(target_url, headers=swe_bench_auth_headers, timeout=30)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, 'lxml')
+            tbody_tag = soup.find("tbody", class_="bg-white divide-y divide-gray-200")
+
+            if tbody_tag:
+                tr_tags = tbody_tag.find_all("tr", class_="hover:bg-gray-50 cursor-pointer")
+                if tr_tags:
+                    print(f"  [SWE-BENCH PASSED] Found {len(tr_tags)} valid batch(es) for {full_name}.")
+                    repo_info["swe_bench_batch_count"] = len(tr_tags)
+                    passed_repos.append(repo_info)
+                else:
+                    print(f"  [SWE-BENCH FAILED] Found <tbody> but no valid <tr> batches for {full_name}.")
+                    failed_or_problematic_repo_urls.append(html_url)
+            else:
+                print(f"  [SWE-BENCH FAILED] Could not find expected <tbody> for {full_name}.")
+                print(f"  Response snippet for {full_name}: {response.text[:200]}")
+                failed_or_problematic_repo_urls.append(html_url)
+
+        except requests.exceptions.HTTPError as http_err:
+            print(f"  [HTTP ERROR] for {full_name} at SWE-Bench ({target_url}): {http_err}")
+            if http_err.response is not None:
+                print(f"  Status Code: {http_err.response.status_code}")
+                if http_err.response.status_code in [401, 403]:
+                    print("  SWE-Bench Authentication error. Please check your token/cookie.")
+            failed_or_problematic_repo_urls.append(html_url)
+        except requests.exceptions.RequestException as req_err:
+            print(f"  [REQUEST ERROR] for {full_name} at SWE-Bench ({target_url}): {req_err}")
+            failed_or_problematic_repo_urls.append(html_url)
+        except Exception as e:
+            print(f"  [UNEXPECTED ERROR] processing {full_name} at SWE-Bench ({target_url}): {e}")
+            failed_or_problematic_repo_urls.append(html_url)
+
+        if i < len(repos_to_check) -1:
+            time.sleep(4)
+
+    # Update the SWE_BENCH_BLACKLIST_FILE
+    if failed_or_problematic_repo_urls:
+        try:
+            existing_blacklist = Load_repos(SWE_BENCH_BLACKLIST_FILE) # Returns a set of URLs
+            # Combine, ensuring uniqueness, then convert to list for JSON
+            combined_blacklist = list(existing_blacklist.union(set(failed_or_problematic_repo_urls)))
+            with open(SWE_BENCH_BLACKLIST_FILE, "w", encoding="utf-8") as f:
+                json.dump(combined_blacklist, f, indent=2, ensure_ascii=False)
+            print(f"Updated {SWE_BENCH_BLACKLIST_FILE} with {len(failed_or_problematic_repo_urls)} new/updated entries.")
+        except Exception as e:
+            print(f"Error writing to {SWE_BENCH_BLACKLIST_FILE}: {e}")
+
+    return passed_repos
