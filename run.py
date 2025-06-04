@@ -55,9 +55,9 @@ def run_filter_pipeline():
         if repo.get("html_url") not in failed_swe_bench_urls and repo.get("html_url") not in owned_repo_urls
     ]
 
-    swe_bench_headers = get_swe_bench_header() # Get headers for SWE-Bench
+    swe_bench_base_headers = get_swe_bench_header(include_user_agent=False) # Get auth headers without UA initially
     # filter_by_swe_bench_batches updates SWE_BENCH_BLACKLIST_FILE internally
-    newly_passed_swe_bench = filter_by_swe_bench_batches(repos_for_swe_bench_check, swe_bench_headers)
+    newly_passed_swe_bench = filter_by_swe_bench_batches(repos_for_swe_bench_check, swe_bench_base_headers)
     print(f"{len(newly_passed_swe_bench)} new repos passed SWE-Bench batch check.")
 
     # Combine and Finalize Green List
